@@ -274,7 +274,7 @@ app.post('/api/create-pending-order', async (req, res) => {
   }
 });
 
-// ToyyibPay Checkout Endpoint
+// ToyyibPay Checkout Endpoints
 app.post('/checkout', async (req, res) => {
   try {
     const { cart, customer, orderId } = req.body;
