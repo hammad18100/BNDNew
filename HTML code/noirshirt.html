@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BND Noir Shirt - Order Now</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      color: #fff;
+      background-color: #000;
+    }
+
+    header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      padding: 10px 5%;
+      border-bottom: 1px solid #333;
+      background: #000;
+      position: relative;
+      z-index: 100;
+    }
+
+    .logo-container {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .logo-container img {
+      height: 60px;
+    }
+
+    .main-nav {
+      display: flex;
+      gap: 30px;
+      align-items: center;
+    }
+
+    .nav-link {
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      text-decoration: none;
+      padding: 15px 0;
+    }
+
+    .product-container {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 60px;
+      padding: 100px 5% 80px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .product-image {
+      flex: 1 1 500px;
+      max-width: 650px;
+    }
+
+    .product-image img {
+      width: 100%;
+      border-radius: 16px;
+      box-shadow: 0 0 50px rgba(255, 255, 255, 0.05);
+    }
+
+    .product-info {
+      flex: 1 1 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .product-name {
+      font-family: 'Anton', sans-serif;
+      font-size: 3rem;
+      margin-bottom: 10px;
+    }
+
+    .product-description {
+      font-size: 1rem;
+      color: #ccc;
+      line-height: 1.6;
+    }
+
+    .product-price {
+      font-size: 1.3rem;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .size-selector {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .size-selector button {
+      background: #1a1a1a;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 10px 18px;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    .size-selector button:hover,
+    .size-selector button.active {
+      background: #fff;
+      color: #000;
+      border-color: #fff;
+    }
+
+    .dropdown {
+      margin-top: 10px;
+    }
+
+    .dropdown select {
+      padding: 10px;
+      font-size: 1rem;
+      background: #1a1a1a;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 8px;
+      width: 120px;
+    }
+
+    .order-btn {
+      margin-top: 20px;
+      padding: 14px 30px;
+      background: #fff;
+      color: #000;
+      font-weight: 700;
+      font-size: 1rem;
+      text-transform: uppercase;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+      letter-spacing: 1px;
+    }
+
+    .order-btn:hover {
+      background: #ccc;
+    }
+
+    @media (max-width: 900px) {
+      .product-container {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .product-name {
+        font-size: 2.2rem;
+      }
+
+      .product-description {
+        font-size: 0.95rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="main-nav">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="products.html" class="nav-link">Collections</a>
+      <a href="aboutus.html" class="nav-link">About Us</a>
+    </nav>
+
+    <div class="logo-container">
+      <a href="index.html">
+        <img src="BND logo.png" alt="BND Logo">
+      </a>
+    </div>
+  </header>
+
+  <section class="product-container">
+    <div class="product-image">
+      <img src="shirt.png" alt="BND Noir Shirt" />
+    </div>
+
+    <div class="product-info">
+      <div class="product-name">BND Oversized Tee</div>
+      <div class="product-description">
+        From Volume One: The Noir Collection. This oversized black tee features front and back prints including the bold "Breaking Norms Daily" motto and our iconic globe logo. Designed for elevated comfort and streetwear edge.
+      </div>
+      <div class="product-price">RM 129.00</div>
+
+      <div class="size-selector">
+        <button onclick="selectSize(this)">S</button>
+        <button onclick="selectSize(this)">M</button>
+        <button onclick="selectSize(this)">L</button>
+        <button onclick="selectSize(this)">XL</button>
+        <button onclick="selectSize(this)">XXL</button>
+      </div>
+
+      <div class="dropdown">
+        <label for="quantity">Quantity: </label>
+        <select id="quantity">
+          <option>1</option>
+          <option>2</option>
+          <option>3</option>
+          <option>4</option>
+          <option>5</option>
+        </select>
+      </div>
+
+      <!-- Placeholder WhatsApp link -->
+      <a id="orderLink" target="_blank" class="order-btn">Place Order</a>
+    </div>
+  </section>
+
+  <script>
+    let selectedSize = '';
+    function selectSize(btn) {
+      document.querySelectorAll('.size-selector button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedSize = btn.textContent;
+      updateOrderLink();
+    }
+
+    document.getElementById('quantity').addEventListener('change', updateOrderLink);
+
+    function updateOrderLink() {
+      const qty = document.getElementById('quantity').value;
+      const sizeText = selectedSize ? `Size: ${selectedSize}` : 'Size not selected';
+      const message = `Hi! I'm interested in the BND Oversized Tee from the Noir Collection.\n${sizeText}\nQuantity: ${qty}`;
+      const encoded = encodeURIComponent(message);
+      document.getElementById('orderLink').href = `https://wa.me/60123456789?text=${encoded}`;
+    }
+
+    // Initialize default link
+    updateOrderLink();
+  </script>
+</body>
+</html>

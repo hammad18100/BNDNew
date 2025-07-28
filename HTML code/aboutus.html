@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>About Us - BND</title>
+  <link rel="stylesheet" href="about.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      background: url('background2.jpg') center center / cover no-repeat;
+      color: #fff;
+    }
+
+    .top-bar {
+      background: #111;
+      color: #ccc;
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 20px;
+      font-size: 0.9rem;
+    }
+
+    .top-bar-left {}
+
+    .top-bar-right {
+      display: none; /* Remove cart/account icons */
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 5%;
+      background: #000;
+    }
+
+    .header-left a,
+    .header-right a {
+      color: white;
+      margin: 0 10px;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .header-center img {
+      height: 60px;
+    }
+
+    .search-box {
+      display: flex;
+      align-items: center;
+      background: #1a1a1a;
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid #333;
+      font-size: 0.9rem;
+      color: #ccc;
+    }
+
+    .search-box svg {
+      margin-right: 8px;
+    }
+
+    .about-section {
+      padding: 60px 20px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .about-content {
+      max-width: 800px;
+      background-color: rgba(0, 0, 0, 0.8);
+      padding: 40px;
+      border-radius: 10px;
+    }
+
+    .about-content h1 {
+      font-size: 2.5rem;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+
+    .about-content p {
+      font-size: 1.1rem;
+      line-height: 1.8;
+      margin-bottom: 20px;
+    }
+
+    strong {
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <span>Malaysia, MYR</span>
+    </div>
+    <div class="top-bar-right"></div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="header-left">
+      <a href="index.html">Home</a>
+      <a href="about.html">About Us</a>
+    </div>
+
+    <div class="header-center">
+      <a href="index.html">
+        <img src="BND logo.png" alt="BND Logo">
+      </a>
+    </div>
+
+    <div class="header-right">
+      <a href="#" class="search-box">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" width="16" height="16" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8" stroke-width="2"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65" stroke-width="2"/>
+        </svg>
+        <span>Search</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- About Us Section -->
+  <section class="about-section">
+    <div class="about-content">
+      <h1>About Us</h1>
+      <p>
+        <strong>BND – Breaking Norms Daily</strong> is more than just a clothing brand.
+        We are a movement – a bold expression of individuality, purpose, and a change.
+      </p>
+      <p>
+        BND was born to break boundaries. We blend premium quality with affordable pricing,
+        proving that style, comfort, and values can go hand in hand. Our collections are designed
+        for those who choose to stand out and who believe in making a difference – daily.
+      </p>
+      <p>
+        But we’re not just here to make you look good. We’re here to give back. A core part of
+        our mission is supporting and uplifting communities through meaningful initiatives –
+        because real style starts with heart.
+      </p>
+      <p>
+        At BND, we’re Breaking Norms Daily – in fashion, in purpose, in impact.<br/>
+        <strong>Be bold. Be different. Be BND.</strong>
+      </p>
+    </div>
+  </section>
+
+</body>
+</html>

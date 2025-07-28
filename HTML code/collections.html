@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BND Collections</title>
+
+  <!-- Substitute for Monument font (replace if you own it) -->
+  <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      color: #fff;
+      background-color: #000;
+    }
+
+    header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      padding: 10px 5%;
+      border-bottom: 1px solid #333;
+      background: #000;
+      position: relative;
+      z-index: 100;
+    }
+
+    .logo-container {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .logo-container img {
+      height: 60px;
+    }
+
+    .main-nav {
+      display: flex;
+      gap: 30px;
+      align-items: center;
+    }
+
+    .nav-link {
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      text-decoration: none;
+      padding: 15px 0;
+    }
+
+    .page-title {
+      text-align: center;
+      margin-top: 100px;
+      font-family: 'Anton', sans-serif;
+      font-size: 3.5rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #fff;
+    }
+
+    .collections-grid {
+      margin: 60px auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 40px;
+      width: 90%;
+      max-width: 1400px;
+    }
+
+    .collection-card {
+      background: #111;
+      border-radius: 12px;
+      overflow: hidden;
+      transition: transform 0.3s ease;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .collection-card:hover {
+      transform: scale(1.03);
+    }
+
+    .collection-card img {
+      width: 100%;
+      height: 300px;
+      object-fit: cover;
+      display: block;
+    }
+
+    .collection-info {
+      padding: 15px;
+      text-align: center;
+    }
+
+    .collection-title {
+      font-family: 'Anton', sans-serif;
+      font-size: 1.4rem;
+      letter-spacing: 1px;
+      color: #fff;
+    }
+
+    .collection-volume {
+      font-size: 0.9rem;
+      color: #888;
+      margin-top: 5px;
+    }
+
+    @media (max-width: 768px) {
+      .page-title {
+        font-size: 2.2rem;
+      }
+
+      .collection-card img {
+        height: 200px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav class="main-nav">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="#" class="nav-link">Shop</a>
+      <a href="collections.html" class="nav-link">Collections</a>
+      <a href="aboutus.html" class="nav-link">About Us</a>
+    </nav>
+
+    <div class="logo-container">
+      <a href="index.html">
+        <img src="BND logo.png" alt="BND Logo">
+      </a>
+    </div>
+  </header>
+
+  <h1 class="page-title">All Collections</h1>
+
+  <section class="collections-grid">
+    <!-- Collection 1 -->
+    <div class="collection-card">
+      <img src="blank-canvas-poster.jpg" alt="Noir Collection">
+      <div class="collection-info">
+        <div class="collection-title">NOIR COLLECTION</div>
+        <div class="collection-volume">Volume One</div>
+      </div>
+    </div>
+
+    <!-- Collection 2 -->
+    <div class="collection-card">
+      <img src="ComingSoon.png" alt="Coming Soon">
+      <div class="collection-info">
+        <div class="collection-title">COMING SOON</div>
+        <div class="collection-volume">Volume Two</div>
+      </div>
+    </div>
+
+    <!-- Collection 3 -->
+    <div class="collection-card">
+      <img src="ComingSoon.png" alt="Coming Soon">
+      <div class="collection-info">
+        <div class="collection-title">COMING SOON</div>
+        <div class="collection-volume">Volume Three</div>
+      </div>
+    </div>
+
+    <!-- Collection 4 -->
+    <div class="collection-card">
+      <img src="ComingSoon.png" alt="Coming Soon">
+      <div class="collection-info">
+        <div class="collection-title">COMING SOON</div>
+        <div class="collection-volume">Volume Four</div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>
