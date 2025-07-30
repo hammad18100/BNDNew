@@ -1,0 +1,49 @@
+/* Extra mobile fixes for header responsiveness */
+@media (max-width: 768px) {
+  .main-header {
+    flex-direction: row;
+    padding: 10px 10px;
+    min-height: 56px;
+  }
+  .logo-container {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    left: 0;
+    transform: none;
+    padding: 0;
+  }
+  .logo-container img {
+    height: 48px;
+  }
+  .header-actions {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+  }
+  .cart-container {
+    min-width: 40px;
+  }
+  .main-nav {
+    display: none;
+  }
+  .mobile-nav-toggle {
+    display: block;
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 10px;
+    margin-left: 10px;
+  }
+}
+@media (max-width: 480px) {
+  .main-header {
+    padding: 8px 4px;
+    min-height: 44px;
+  }
+  .logo-container img {
+    height: 36px;
+  }
+}

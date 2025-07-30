@@ -49,13 +49,16 @@ main {
 }
 
 .logo-container {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  position: relative;
+  left: 0;
+  transform: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .logo-container img {
-  height: 100px;
+  height: 80px;
   max-width: 100%;
   display: block;
   margin: 0 auto;

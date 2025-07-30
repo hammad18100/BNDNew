@@ -42,16 +42,25 @@ function renderCheckoutCart() {
   }
   let total = 0;
   summaryDiv.innerHTML = cart.map(item => {
-    const itemTotal = item.price * item.quantity;
+    // Ensure price and quantity are numbers
+    const price = typeof item.price === 'string' ? parseFloat(item.price) : item.price;
+    const quantity = typeof item.quantity === 'string' ? parseInt(item.quantity) : item.quantity;
+    const itemTotal = price * quantity;
     total += itemTotal;
     return `<div class='checkout-cart-item'>
-      <span>${item.name} (Size: ${item.size}) x${item.quantity}</span>
+      <span>${item.name} (Size: ${item.size}) x${quantity}</span>
       <span>RM ${itemTotal.toFixed(2)}</span>
     </div>`;
   }).join('');
   totalSpan.textContent = 'RM ' + total.toFixed(2);
 }
 renderCheckoutCart();
+// Live update if cart changes in another tab or window
+window.addEventListener('storage', function(e) {
+  if (e.key === 'cart') {
+    renderCheckoutCart();
+  }
+});
 
 // Handle form submit
 const checkoutForm = document.getElementById('checkoutForm');
@@ -233,4 +242,4 @@ checkoutForm.addEventListener('submit', async function(e) {
 .checkout-btn:hover {
   background: #f0f0f0;
 }
-</style> 
+</style>

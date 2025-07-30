@@ -295,7 +295,6 @@ class Cart {
     this.items = JSON.parse(localStorage.getItem('cart')) || [];
     this.isOpen = false; // Track cart open state
     this.init();  
-    
     // Ensure cart starts closed
     const cartDropdown = document.getElementById('cartDropdown');
     if (cartDropdown) {
@@ -373,22 +372,33 @@ class Cart {
   }
 
   addItem(product) {
+    // Find the total stock for this variant from the DOM (if available)
+    const stockBtn = document.querySelector(`[data-variant-id="${product.variantId}"]`);
+    const totalStock = stockBtn ? parseInt(stockBtn.dataset.stockQuantity || '0') : 0;
     const existingItem = this.items.find(item => 
       item.variantId === product.variantId && item.size === product.size
     );
-
     if (existingItem) {
-      existingItem.quantity += product.quantity;
+      // Increment, but do not exceed stock
+      const newQty = existingItem.quantity + product.quantity;
+      if (totalStock > 0 && newQty > totalStock) {
+        existingItem.quantity = totalStock;
+        alert(`Cannot add more than available in stock for this size.`);
+      } else {
+        existingItem.quantity = newQty;
+      }
     } else {
+      // Do not add more than stock
+      if (totalStock > 0 && product.quantity > totalStock) {
+        product.quantity = totalStock;
+        alert(`Cannot add more than available in stock for this size.`);
+      }
       this.items.push(product);
     }
-
     this.saveCart();
     this.updateCartCount();
     this.renderCart();
     this.showAddToCartMessage();
-    
-    // Refresh stock validation on product detail pages
     if (typeof initializeStockValidation === 'function') {
       initializeStockValidation();
     }
@@ -407,6 +417,14 @@ class Cart {
   }
 
   updateQuantity(index, newQuantity) {
+    const item = this.items[index];
+    // Find the total stock for this variant from the DOM (if available)
+    const stockBtn = document.querySelector(`[data-variant-id="${item.variantId}"]`);
+    const totalStock = stockBtn ? parseInt(stockBtn.dataset.stockQuantity || '0') : 0;
+    if (newQuantity > totalStock) {
+      alert(`Cannot set quantity higher than ${totalStock} in stock for this size.`);
+      return;
+    }
     if (newQuantity > 0) {
       this.items[index].quantity = newQuantity;
     } else {
@@ -416,7 +434,6 @@ class Cart {
     this.saveCart();
     this.updateCartCount();
     this.renderCart();
-    
     // Refresh stock validation on product detail pages
     if (typeof initializeStockValidation === 'function') {
       initializeStockValidation();
@@ -556,26 +573,40 @@ function addToCart(productData) {
   if (!cart) {
     cart = new Cart();
   }
-  
   const selectedSize = document.querySelector('.size-btn.active');
   if (!selectedSize) {
     alert('Please select a size');
     return;
   }
-
-  const quantity = parseInt(document.getElementById('quantity-number').textContent);
-  
+  const quantityInput = document.getElementById('quantity-number');
+  const quantity = parseInt(quantityInput.textContent);
+  const variantId = selectedSize.dataset.variantId;
+  const stockBtn = document.querySelector(`[data-variant-id="${variantId}"]`);
+  const totalStock = stockBtn ? parseInt(stockBtn.dataset.stockQuantity || '0') : 0;
+  // Calculate how many are already in cart for this variant
+  const cartItem = cart.items.find(item => item.variantId === variantId && item.size === selectedSize.dataset.size);
+  const cartQuantity = cartItem ? cartItem.quantity : 0;
+  const availableStock = Math.max(0, totalStock - cartQuantity);
+  if (quantity > availableStock) {
+    alert('Cannot add more than available in stock for this size (including what is already in your cart).');
+    return;
+  }
+  // Always increment in cart, but never exceed stock
   const product = {
     id: productData.id,
     name: productData.name,
     price: productData.price,
     image: productData.image,
     size: selectedSize.dataset.size,
-    variantId: selectedSize.dataset.variantId,
+    variantId: variantId,
     quantity: quantity
   };
-
   cart.addItem(product);
+  quantityInput.textContent = '1';
+  if (typeof initializeStockValidation === 'function') {
+    initializeStockValidation();
+    updateQuantityButtonsState(1, totalStock - Math.min(totalStock, (cartQuantity + quantity)));
+  }
 }
 
 // Buy Now function for product pages
@@ -606,78 +637,78 @@ function initializeStockValidation() {
   const quantityInput = document.getElementById('quantity-number');
   const quantityMinus = document.getElementById('quantity-minus');
   const quantityPlus = document.getElementById('quantity-plus');
-  
   if (sizeBtns.length > 0 && quantityInput) {
     let currentVariantId = null;
     let maxStock = 0;
-    
-    // Get cart instance
     const cart = window.cart || new Cart();
-    
-    // Function to get available stock considering cart
     function getAvailableStock(variantId) {
+      const stockQuantity = parseInt(document.querySelector(`[data-variant-id="${variantId}"]`).dataset.stockQuantity || 0);
       const cartItem = cart.items.find(item => item.variantId === variantId);
       const cartQuantity = cartItem ? cartItem.quantity : 0;
-      const stockQuantity = parseInt(document.querySelector(`[data-variant-id="${variantId}"]`).dataset.stockQuantity || 0);
       return Math.max(0, stockQuantity - cartQuantity);
     }
-    
-    // Get stock data for all variants
-    const variants = [];
+    // Disable out-of-stock sizes and auto-select first in-stock
+    let firstInStockBtn = null;
     sizeBtns.forEach(btn => {
       const variantId = btn.dataset.variantId;
       const availableStock = getAvailableStock(variantId);
-      variants.push({ variantId, availableStock });
+      btn.disabled = availableStock === 0;
+      btn.style.opacity = availableStock === 0 ? '0.5' : '1';
+      if (!firstInStockBtn && availableStock > 0) firstInStockBtn = btn;
     });
-    
+    // Auto-select first in-stock size if none selected
+    if (!document.querySelector('.size-btn.active') && firstInStockBtn) {
+      firstInStockBtn.classList.add('active');
+      currentVariantId = firstInStockBtn.dataset.variantId;
+      maxStock = getAvailableStock(currentVariantId);
+      quantityInput.textContent = '1';
+      updateQuantityButtonsState(1, maxStock);
+      const addToCartBtn = document.getElementById('orderBtn');
+      if (addToCartBtn) {
+        addToCartBtn.disabled = maxStock === 0;
+        addToCartBtn.style.opacity = maxStock === 0 ? '0.5' : '1';
+      }
+      showStockInfoWithCart(maxStock, currentVariantId);
+    }
     sizeBtns.forEach(btn => {
       btn.addEventListener('click', function() {
+        sizeBtns.forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
         const variantId = this.dataset.variantId;
         const availableStock = getAvailableStock(variantId);
-        
         currentVariantId = variantId;
         maxStock = availableStock;
-        
-        // Always reset quantity to 1 when size changes
         quantityInput.textContent = '1';
-        
-        // Update quantity buttons state immediately
         updateQuantityButtonsState(1, availableStock);
-        
-        // Show stock info with cart consideration
+        const addToCartBtn = document.getElementById('orderBtn');
+        if (addToCartBtn) {
+          addToCartBtn.disabled = availableStock === 0;
+          addToCartBtn.style.opacity = availableStock === 0 ? '0.5' : '1';
+        }
         showStockInfoWithCart(availableStock, variantId);
       });
     });
-    
-    // Quantity button handlers
     if (quantityMinus && quantityPlus) {
-      quantityMinus.addEventListener('click', () => {
-        const currentQty = parseInt(quantityInput.textContent);
+      quantityMinus.replaceWith(quantityMinus.cloneNode(true));
+      quantityPlus.replaceWith(quantityPlus.cloneNode(true));
+      const newQuantityMinus = document.getElementById('quantity-minus');
+      const newQuantityPlus = document.getElementById('quantity-plus');
+      newQuantityMinus.addEventListener('click', () => {
+        let currentQty = parseInt(quantityInput.textContent);
+        if (isNaN(currentQty) || currentQty < 1) currentQty = 1;
         if (currentQty > 1) {
-          const newQty = currentQty - 1;
-          quantityInput.textContent = newQty;
-          updateQuantityButtonsState(newQty, maxStock);
+          quantityInput.textContent = (currentQty - 1).toString();
+          updateQuantityButtonsState(currentQty - 1, maxStock);
         }
       });
-      
-      quantityPlus.addEventListener('click', () => {
-        const currentQty = parseInt(quantityInput.textContent);
+      newQuantityPlus.addEventListener('click', () => {
+        let currentQty = parseInt(quantityInput.textContent);
+        if (isNaN(currentQty) || currentQty < 1) currentQty = 1;
         if (currentQty < maxStock) {
-          const newQty = currentQty + 1;
-          quantityInput.textContent = newQty;
-          updateQuantityButtonsState(newQty, maxStock);
+          quantityInput.textContent = (currentQty + 1).toString();
+          updateQuantityButtonsState(currentQty + 1, maxStock);
         }
       });
-    }
-    
-    // Initialize with first size selected (if any)
-    const firstSizeBtn = sizeBtns[0];
-    if (firstSizeBtn) {
-      const variantId = firstSizeBtn.dataset.variantId;
-      const availableStock = getAvailableStock(variantId);
-      maxStock = availableStock;
-      updateQuantityButtonsState(1, availableStock);
-      showStockInfoWithCart(availableStock, variantId);
     }
   }
 }
@@ -742,53 +773,23 @@ function showStockInfoWithCart(availableStock, variantId) {
   if (existingInfo) {
     existingInfo.remove();
   }
-  
-  // Get cart instance
-  const cart = window.cart || new Cart();
-  const cartItem = cart.items.find(item => item.variantId === variantId);
-  const cartQuantity = cartItem ? cartItem.quantity : 0;
-  const totalStock = parseInt(document.querySelector(`[data-variant-id="${variantId}"]`).dataset.stockQuantity || 0);
-  
-  // Create stock info element
-  const stockInfo = document.createElement('div');
-  stockInfo.className = 'stock-info';
-  stockInfo.style.cssText = `
-    margin-top: 10px;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    font-weight: 500;
-  `;
-  
-  if (availableStock > 10) {
-    stockInfo.style.background = '#1a3a1a';
-    stockInfo.style.color = '#4ade80';
-    stockInfo.textContent = `✓ In Stock (${availableStock} available)`;
-  } else if (availableStock > 0) {
-    stockInfo.style.background = '#3a2a1a';
-    stockInfo.style.color = '#fbbf24';
-    stockInfo.textContent = `⚠ Low Stock (${availableStock} available)`;
-  } else {
-    stockInfo.style.background = '#3a1a1a';
-    stockInfo.style.color = '#f87171';
-    stockInfo.textContent = '✗ Out of Stock';
-  }
-  
-  // Add cart info if items are in cart
-  if (cartQuantity > 0) {
-    const cartInfo = document.createElement('div');
-    cartInfo.style.cssText = `
-      margin-top: 5px;
-      font-size: 0.8rem;
-      color: #888;
+  // Only show out of stock if 0, otherwise show nothing
+  if (availableStock === 0) {
+    const stockInfo = document.createElement('div');
+    stockInfo.className = 'stock-info';
+    stockInfo.style.cssText = `
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      background: #3a1a1a;
+      color: #f87171;
     `;
-    cartInfo.textContent = `(${cartQuantity} already in cart)`;
-    stockInfo.appendChild(cartInfo);
-  }
-  
-  // Insert after quantity box
-  const quantityBox = document.querySelector('.quantity-box');
-  if (quantityBox) {
-    quantityBox.parentNode.insertBefore(stockInfo, quantityBox.nextSibling);
+    stockInfo.textContent = '✗ Out of Stock';
+    const quantityBox = document.querySelector('.quantity-box');
+    if (quantityBox) {
+      quantityBox.parentNode.insertBefore(stockInfo, quantityBox.nextSibling);
+    }
   }
 }
