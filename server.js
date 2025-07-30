@@ -60,7 +60,8 @@ app.get('/products', async (req, res) => {
         const result = await pool.query(query);
         res.render('products', { 
             title: title, 
-            products: result.rows 
+            products: result.rows,
+            message: req.query.message || null
         });
     } catch (err) {
         console.error('Error on /products route:', err);
@@ -104,6 +105,8 @@ app.get('/checkout', (req, res) => {
 // Thank You Page
 app.get('/thank-you/:orderId', async (req, res) => {
   const { orderId } = req.params;
+  const { status } = req.query; // ToyyibPay will add status parameter
+  
   try {
     // Get order details
     const orderResult = await pool.query(
@@ -117,9 +120,92 @@ app.get('/thank-you/:orderId', async (req, res) => {
     
     const order = orderResult.rows[0];
     
+    // If payment was successful (status=1) but order is still pending, update it
+    if (status === '1' && order.status === 'pending') {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        
+        // Check if order is still pending (prevent double processing)
+        const orderCheck = await client.query(
+          'SELECT status FROM orders WHERE order_id = $1 FOR UPDATE',
+          [orderId]
+        );
+        
+        if (orderCheck.rows.length === 0) {
+          throw new Error('Order not found');
+        }
+        
+        if (orderCheck.rows[0].status === 'paid') {
+          console.log(`Order ${orderId} already processed via return URL`);
+          await client.query('COMMIT');
+        } else {
+          // Update order status to 'paid'
+          await client.query(
+            'UPDATE orders SET status = $1 WHERE order_id = $2',
+            ['paid', orderId]
+          );
+          
+          // Get order items and deduct stock with validation
+          const orderItemsResult = await client.query(
+            'SELECT variant_id, quantity FROM order_items WHERE order_id = $1',
+            [orderId]
+          );
+          
+          // Deduct stock for each item with validation
+          for (const item of orderItemsResult.rows) {
+            // Check current stock before deducting
+            const stockCheck = await client.query(
+              'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
+              [item.variant_id]
+            );
+            
+            if (stockCheck.rows.length === 0) {
+              throw new Error(`Variant ${item.variant_id} not found during stock deduction`);
+            }
+            
+            const currentStock = stockCheck.rows[0].stock_quantity;
+            if (currentStock < item.quantity) {
+              throw new Error(`Insufficient stock for variant ${item.variant_id}. Available: ${currentStock}, Requested: ${item.quantity}`);
+            }
+            
+            // Deduct stock
+            await client.query(
+              'UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2',
+              [item.quantity, item.variant_id]
+            );
+            
+            console.log(`Deducted ${item.quantity} from variant ${item.variant_id} via return URL`);
+          }
+          
+          await client.query('COMMIT');
+          console.log(`Order ${orderId} payment confirmed via return URL`);
+        }
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error processing payment confirmation via return URL:', err);
+      } finally {
+        client.release();
+      }
+      
+      // Refresh order data after update
+      const updatedOrderResult = await pool.query(
+        'SELECT * FROM orders WHERE order_id = $1',
+        [orderId]
+      );
+      if (updatedOrderResult.rows.length > 0) {
+        order.status = updatedOrderResult.rows[0].status;
+      }
+    }
+    
+    // Handle failed payments
+    if (status === '0' || status === '2') {
+      return res.redirect('/products?message=Payment failed. Please try again.');
+    }
+    
     // Only show thank you page for paid orders
     if (order.status !== 'paid') {
-      return res.redirect('/products?message=Payment pending');
+      return res.redirect('/products?message=Payment pending or failed');
     }
     
     // Get customer details
@@ -204,6 +290,71 @@ app.post('/api/check-stock', async (req, res) => {
   }
 });
 
+// Real-time Stock Validation API - For immediate stock checking
+app.post('/api/validate-stock', async (req, res) => {
+  const { cart } = req.body;
+  if (!cart || !Array.isArray(cart) || cart.length === 0) {
+    return res.status(400).json({ success: false, message: 'Cart is required.' });
+  }
+  
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const validationResults = [];
+    let allValid = true;
+    
+    for (const item of cart) {
+      // Use FOR UPDATE to lock the row and prevent race conditions
+      const stockResult = await client.query(
+        'SELECT pv.stock_quantity, pv.variant_id, pv.size, pv.color, p.name FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1 FOR UPDATE',
+        [item.variant_id]
+      );
+      
+      if (stockResult.rows.length === 0) {
+        validationResults.push({
+          variant_id: item.variant_id,
+          valid: false,
+          message: 'Variant not found'
+        });
+        allValid = false;
+      } else {
+        const available = stockResult.rows[0].stock_quantity;
+        const valid = available >= item.quantity;
+        
+        validationResults.push({
+          variant_id: item.variant_id,
+          product_name: stockResult.rows[0].name,
+          size: stockResult.rows[0].size,
+          color: stockResult.rows[0].color,
+          available: available,
+          requested: item.quantity,
+          valid: valid,
+          message: valid ? 'Stock available' : `Only ${available} available`
+        });
+        
+        if (!valid) {
+          allValid = false;
+        }
+      }
+    }
+    
+    await client.query('COMMIT');
+    
+    res.json({
+      success: true,
+      all_valid: allValid,
+      validation_results: validationResults
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error validating stock:', err);
+    res.status(500).json({ success: false, message: 'Error validating stock availability.' });
+  } finally {
+    client.release();
+  }
+});
+
 // API Route for Creating Pending Order (before payment)
 app.post('/api/create-pending-order', async (req, res) => {
   const { email, name, phone, address, cart } = req.body;
@@ -238,20 +389,22 @@ app.post('/api/create-pending-order', async (req, res) => {
     );
     const orderId = orderResult.rows[0].order_id;
 
-    // 4. For each item: check stock and insert order_item (but don't deduct stock yet)
+    // 4. For each item: check stock with FOR UPDATE lock and insert order_item
     for (const item of cart) {
-      // a. Check stock availability
+      // a. Check stock availability with row lock to prevent race conditions
       const stockResult = await client.query(
-        'SELECT stock_quantity FROM product_variants WHERE variant_id = $1',
+        'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
         [item.variant_id]
       );
-      if (stockResult.rows.length === 0) throw new Error('Variant not found');
+      if (stockResult.rows.length === 0) {
+        throw new Error(`Variant ${item.variant_id} not found`);
+      }
       
       const availableStock = stockResult.rows[0].stock_quantity;
       if (availableStock < item.quantity) {
         throw new Error(`Insufficient stock for variant ${item.variant_id}. Available: ${availableStock}, Requested: ${item.quantity}`);
       }
-
+      
       // b. Insert order_item
       await client.query(
         'INSERT INTO order_items (order_id, variant_id, quantity, price_at_purchase) VALUES ($1, $2, $3, $4)',
@@ -331,7 +484,6 @@ app.post('/checkout', async (req, res) => {
 app.post('/toyyibpay-callback', async (req, res) => {
   try {
     const { order_id, status, billcode } = req.body;
-    
     console.log('ToyyibPay callback received:', { order_id, status, billcode });
     
     if (status === '1') { // Payment successful
@@ -339,30 +491,63 @@ app.post('/toyyibpay-callback', async (req, res) => {
       try {
         await client.query('BEGIN');
         
+        // Check if order is still pending (prevent double processing)
+        const orderCheck = await client.query(
+          'SELECT status FROM orders WHERE order_id = $1 FOR UPDATE',
+          [order_id]
+        );
+        
+        if (orderCheck.rows.length === 0) {
+          throw new Error('Order not found');
+        }
+        
+        if (orderCheck.rows[0].status === 'paid') {
+          console.log(`Order ${order_id} already processed`);
+          await client.query('COMMIT');
+          return res.json({ success: true, message: 'Order already processed' });
+        }
+        
         // Update order status to 'paid'
         await client.query(
           'UPDATE orders SET status = $1 WHERE order_id = $2',
           ['paid', order_id]
         );
         
-        // Get order items and deduct stock
+        // Get order items and deduct stock with validation
         const orderItemsResult = await client.query(
           'SELECT variant_id, quantity FROM order_items WHERE order_id = $1',
           [order_id]
         );
         
-        // Deduct stock for each item
+        // Deduct stock for each item with validation
         for (const item of orderItemsResult.rows) {
+          // Check current stock before deducting
+          const stockCheck = await client.query(
+            'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
+            [item.variant_id]
+          );
+          
+          if (stockCheck.rows.length === 0) {
+            throw new Error(`Variant ${item.variant_id} not found during stock deduction`);
+          }
+          
+          const currentStock = stockCheck.rows[0].stock_quantity;
+          if (currentStock < item.quantity) {
+            throw new Error(`Insufficient stock for variant ${item.variant_id}. Available: ${currentStock}, Requested: ${item.quantity}`);
+          }
+          
+          // Deduct stock
           await client.query(
             'UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2',
             [item.quantity, item.variant_id]
           );
+          
+          console.log(`Deducted ${item.quantity} from variant ${item.variant_id}`);
         }
         
         await client.query('COMMIT');
-        console.log(`Order ${order_id} payment confirmed and stock updated`);
-        
-        res.json({ success: true, message: 'Payment confirmed' });
+        console.log(`Order ${order_id} payment confirmed and stock updated successfully`);
+        res.json({ success: true, message: 'Payment confirmed and stock updated' });
       } catch (err) {
         await client.query('ROLLBACK');
         console.error('Error processing payment confirmation:', err);

@@ -79,6 +79,29 @@
 </main>
 <%- include('partials/footer') %>
 
+<script>
+// Clear cart immediately when thank you page loads
+document.addEventListener('DOMContentLoaded', function() {
+  // Clear the cart from localStorage
+  localStorage.removeItem('cart');
+  
+  // Update cart count display
+  const cartCount = document.getElementById('cartCount');
+  if (cartCount) {
+    cartCount.textContent = '0';
+    cartCount.style.display = 'none';
+  }
+  
+  // Close cart dropdown if open
+  const cartDropdown = document.getElementById('cartDropdown');
+  if (cartDropdown) {
+    cartDropdown.classList.remove('active');
+  }
+  
+  console.log('Cart cleared after successful order');
+});
+</script>
+
 <style>
 .thank-you-main {
   min-height: 100vh;

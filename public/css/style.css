@@ -1913,3 +1913,19 @@ body.products-page, .products-page main {
   }
 }
 
+/* Message Banner */
+.message-banner {
+  background: #1a3a1a;
+  color: #4ade80;
+  padding: 12px 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.message-banner.error {
+  background: #3a1a1a;
+  color: #f87171;
+}
+

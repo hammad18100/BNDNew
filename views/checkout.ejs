@@ -80,6 +80,29 @@ checkoutForm.addEventListener('submit', async function(e) {
       price: item.price
     }));
     
+    // First, validate stock availability with real-time check
+    const stockValidationResponse = await fetch('/api/validate-stock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cart: transformedCart })
+    });
+    
+    const stockValidationData = await stockValidationResponse.json();
+    
+    if (!stockValidationData.success) {
+      errorDiv.textContent = 'Error checking stock availability.';
+      return;
+    }
+    
+    if (!stockValidationData.all_valid) {
+      const stockErrors = stockValidationData.validation_results
+        .filter(result => !result.valid)
+        .map(result => `${result.product_name} (${result.size}): ${result.message}`)
+        .join(', ');
+      errorDiv.textContent = `Stock issues: ${stockErrors}`;
+      return;
+    }
+    
     // First, create a pending order
     const orderResponse = await fetch('/api/create-pending-order', {
       method: 'POST',

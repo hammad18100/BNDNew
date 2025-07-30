@@ -3,6 +3,12 @@
 <main>
   <h1 class="page-title"><%= title %></h1>
 
+  <% if (typeof message !== 'undefined' && message) { %>
+    <div class="message-banner <%= message.includes('failed') ? 'error' : '' %>">
+      <%= message %>
+    </div>
+  <% } %>
+
   <section class="product-grid">
     <% if (products.length > 0) { %>
       <% products.forEach(product => { %>
