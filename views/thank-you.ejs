@@ -1,9 +1,15 @@
 <%- include('partials/header', { title: 'Thank You - BND' }) %>
 <main class="thank-you-main">
   <div class="thank-you-container">
-    <div class="success-icon">✓</div>
-    <h1 class="thank-you-title">Thank You for Your Order!</h1>
-    <p class="thank-you-subtitle">Your order has been successfully placed.</p>
+    <% if (typeof paymentStatus !== 'undefined' && paymentStatus === 'processing') { %>
+      <div class="processing-icon">⟳</div>
+      <h1 class="thank-you-title">Processing Your Payment</h1>
+      <p class="thank-you-subtitle">Please wait while we confirm your payment. This page will automatically refresh...</p>
+    <% } else { %>
+      <div class="success-icon">✓</div>
+      <h1 class="thank-you-title">Thank You for Your Order!</h1>
+      <p class="thank-you-subtitle">Your payment has been confirmed and your order is being processed.</p>
+    <% } %>
     
     <div class="order-details">
       <h2>Order Details</h2>
@@ -18,7 +24,7 @@
         </div>
         <div class="info-row">
           <span class="label">Total Amount:</span>
-          <span class="value">RM <%= order.total_amount.toFixed(2) %></span>
+          <span class="value">RM <%= Number(order.total_amount).toFixed(2) %></span>
         </div>
         <div class="info-row">
           <span class="label">Status:</span>
@@ -80,8 +86,18 @@
 <%- include('partials/footer') %>
 
 <script>
-// Clear cart immediately when thank you page loads
+// Auto-refresh for processing payments
+function checkPaymentStatus() {
+  if (document.querySelector('.processing-icon')) {
+    setTimeout(() => {
+      window.location.reload();
+    }, 5000); // Refresh every 5 seconds
+  }
+}
+
+// Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
+  checkPaymentStatus();
   // Clear the cart from localStorage
   localStorage.removeItem('cart');
   
@@ -118,10 +134,9 @@ document.addEventListener('DOMContentLoaded', function() {
   padding: 40px;
 }
 
-.success-icon {
+.success-icon, .processing-icon {
   width: 80px;
   height: 80px;
-  background: #4CAF50;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -129,6 +144,20 @@ document.addEventListener('DOMContentLoaded', function() {
   font-size: 40px;
   color: white;
   margin: 0 auto 20px;
+}
+
+.success-icon {
+  background: #4CAF50;
+}
+
+.processing-icon {
+  background: #FF9800;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .thank-you-title {
