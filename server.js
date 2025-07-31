@@ -102,7 +102,438 @@ app.get('/checkout', (req, res) => {
   res.render('checkout', { title: 'Checkout - BND' });
 });
 
-// Thank You Page
+
+
+// API Route for Creating Pending Order (before payment)
+app.post('/api/create-pending-order', async (req, res) => {
+  const { email, name, phone, address, cart } = req.body;
+  if (!cart || !Array.isArray(cart) || cart.length === 0 || !email) {
+    return res.status(400).json({ success: false, message: 'Missing required order information.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // First, verify stock availability
+    for (const item of cart) {
+      const stockResult = await client.query(
+        'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
+        [item.variant_id]
+      );
+      
+      if (stockResult.rows.length === 0) {
+        throw new Error(`Product variant not found: ${item.variant_id}`);
+      }
+      
+      const availableStock = stockResult.rows[0].stock_quantity;
+      if (availableStock < item.quantity) {
+        throw new Error(`Insufficient stock for item. Available: ${availableStock}, Requested: ${item.quantity}`);
+      }
+    }
+    
+    // 1. Upsert user
+    const userResult = await client.query(
+      `INSERT INTO users (name, email, phone, address)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, phone=EXCLUDED.phone, address=EXCLUDED.address
+       RETURNING user_id`,
+      [name || 'New User', email, phone || '', address || '']
+    );
+    const userId = userResult.rows[0].user_id;
+    
+    // 2. Calculate total
+    let totalAmount = 0;
+    for (const item of cart) {
+      totalAmount += item.price * item.quantity;
+    }
+    
+    // 3. Insert order with 'pending' status (no stock deduction yet)
+    const orderResult = await client.query(
+      'INSERT INTO orders (customer_id, order_date, status, total_amount) VALUES ($1, NOW(), $2, $3) RETURNING order_id',
+      [userId, 'pending', totalAmount]
+    );
+    const orderId = orderResult.rows[0].order_id;
+    
+    // 4. For each item: check stock with FOR UPDATE lock and insert order_item
+    for (const item of cart) {
+      // a. Check stock availability with row lock to prevent race conditions
+      const stockResult = await client.query(
+        'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
+        [item.variant_id]
+      );
+      if (stockResult.rows.length === 0) {
+        throw new Error(`Variant ${item.variant_id} not found`);
+      }
+      const availableStock = stockResult.rows[0].stock_quantity;
+      if (availableStock < item.quantity) {
+        throw new Error(`Insufficient stock for variant ${item.variant_id}. Available: ${availableStock}, Requested: ${item.quantity}`);
+      }
+      
+      // b. Insert order_item
+      await client.query(
+        'INSERT INTO order_items (order_id, variant_id, quantity, price_at_purchase) VALUES ($1, $2, $3, $4)',
+        [orderId, item.variant_id, item.quantity, item.price]
+      );
+    }
+    
+    await client.query('COMMIT');
+    res.json({ 
+      success: true, 
+      message: 'Pending order created successfully!', 
+      orderId
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error creating pending order:', err);
+    res.status(500).json({ success: false, message: err.message || 'Failed to create pending order.' });
+  } finally {
+    client.release();
+  }
+});
+
+// Stock Check API - Check availability before ordering
+app.post('/api/check-stock', async (req, res) => {
+  const { cart } = req.body;
+  if (!cart || !Array.isArray(cart) || cart.length === 0) {
+    return res.status(400).json({ success: false, message: 'Cart is required.' });
+  }
+  try {
+    const stockChecks = [];
+    for (const item of cart) {
+      const stockResult = await pool.query(
+        'SELECT pv.stock_quantity, pv.variant_id, pv.size, pv.color, p.name FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1',
+        [item.variant_id]
+      );
+      if (stockResult.rows.length === 0) {
+        stockChecks.push({
+          variant_id: item.variant_id,
+          available: 0,
+          requested: item.quantity,
+          in_stock: false,
+          message: 'Variant not found'
+        });
+      } else {
+        const available = stockResult.rows[0].stock_quantity;
+        const inStock = available >= item.quantity;
+        stockChecks.push({
+          variant_id: item.variant_id,
+          product_name: stockResult.rows[0].name,
+          size: stockResult.rows[0].size,
+          color: stockResult.rows[0].color,
+          available: available,
+          requested: item.quantity,
+          in_stock: inStock,
+          message: inStock ? 'In stock' : `Only ${available} available`
+        });
+      }
+    }
+    const allInStock = stockChecks.every(check => check.in_stock);
+    res.json({
+      success: true,
+      all_in_stock: allInStock,
+      stock_checks: stockChecks
+    });
+  } catch (err) {
+    console.error('Error checking stock:', err);
+    res.status(500).json({ success: false, message: 'Error checking stock availability.' });
+  }
+});
+
+// Real-time Stock Validation API - For immediate stock checking
+app.post('/api/validate-stock', async (req, res) => {
+  const { cart } = req.body;
+  if (!cart || !Array.isArray(cart) || cart.length === 0) {
+    return res.status(400).json({ success: false, message: 'Cart is required.' });
+  }
+  
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const validationResults = [];
+    let allValid = true;
+    
+    for (const item of cart) {
+      // Use FOR UPDATE to lock the row and prevent race conditions
+      const stockResult = await client.query(
+        'SELECT pv.stock_quantity, pv.variant_id, pv.size, pv.color, p.name FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1 FOR UPDATE',
+        [item.variant_id]
+      );
+      
+      if (stockResult.rows.length === 0) {
+        validationResults.push({
+          variant_id: item.variant_id,
+          valid: false,
+          message: 'Variant not found'
+        });
+        allValid = false;
+      } else {
+        const available = stockResult.rows[0].stock_quantity;
+        const valid = available >= item.quantity;
+        
+        validationResults.push({
+          variant_id: item.variant_id,
+          product_name: stockResult.rows[0].name,
+          size: stockResult.rows[0].size,
+          color: stockResult.rows[0].color,
+          available: available,
+          requested: item.quantity,
+          valid: valid,
+          message: valid ? 'Stock available' : `Only ${available} available`
+        });
+        
+        if (!valid) {
+          allValid = false;
+        }
+      }
+    }
+    
+    await client.query('COMMIT');
+    
+    res.json({
+      success: true,
+      all_valid: allValid,
+      validation_results: validationResults
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error validating stock:', err);
+    res.status(500).json({ success: false, message: 'Error validating stock availability.' });
+  } finally {
+    client.release();
+  }
+});
+
+// API Route for Ordering (multi-item, robust, production-ready)
+app.post('/api/orders', async (req, res) => {
+  const { email, name, phone, address, cart } = req.body;
+  // cart: [{ variant_id, quantity, price }]
+  if (!cart || !Array.isArray(cart) || cart.length === 0 || !email) {
+    return res.status(400).json({ success: false, message: 'Missing required order information.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // 1. Upsert user
+    const userResult = await client.query(
+      `INSERT INTO users (name, email, phone, address)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, phone=EXCLUDED.phone, address=EXCLUDED.address
+       RETURNING user_id`,
+      [name || 'New User', email, phone || '', address || '']
+    );
+    const userId = userResult.rows[0].user_id;
+
+    // 2. Calculate total
+    let totalAmount = 0;
+    for (const item of cart) {
+      totalAmount += item.price * item.quantity;
+    }
+
+    // 3. Insert order
+    const orderResult = await client.query(
+      'INSERT INTO orders (customer_id, order_date, status, total_amount) VALUES ($1, NOW(), $2, $3) RETURNING order_id',
+      [userId, 'paid', totalAmount]
+    );
+    const orderId = orderResult.rows[0].order_id;
+
+    // 4. For each item: check stock, insert order_item, deduct stock
+    for (const item of cart) {
+      // a. Check stock
+      const stockResult = await client.query(
+        'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
+        [item.variant_id]
+      );
+      if (stockResult.rows.length === 0) throw new Error('Variant not found');
+      
+      const availableStock = stockResult.rows[0].stock_quantity;
+      if (availableStock < item.quantity) {
+        throw new Error(`Insufficient stock for variant ${item.variant_id}. Available: ${availableStock}, Requested: ${item.quantity}`);
+      }
+
+      // b. Insert order_item
+      await client.query(
+        'INSERT INTO order_items (order_id, variant_id, quantity, price_at_purchase) VALUES ($1, $2, $3, $4)',
+        [orderId, item.variant_id, item.quantity, item.price]
+      );
+
+      // c. Deduct stock
+      await client.query(
+        'UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2',
+        [item.quantity, item.variant_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Order placed successfully!', orderId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error processing order:', err);
+    res.status(500).json({ success: false, message: err.message || 'Failed to place order.' });
+  } finally {
+    client.release();
+  }
+});
+
+// ToyyibPay Checkout Endpoints
+app.post('/checkout', async (req, res) => {
+  try {
+    const { cart, customer, orderId } = req.body;
+    if (!cart || !Array.isArray(cart) || cart.length === 0) {
+      return res.status(400).json({ success: false, message: 'Cart is empty.' });
+    }
+    if (!customer || !customer.name || !customer.email || !customer.phone) {
+      return res.status(400).json({ success: false, message: 'Customer info required.' });
+    }
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Order ID required.' });
+    }
+
+    // First, verify stock availability
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Check stock for each item
+      for (const item of cart) {
+        const stockResult = await client.query(
+          'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
+          [item.variant_id]
+        );
+        
+        if (stockResult.rows.length === 0) {
+          throw new Error(`Product variant not found: ${item.variant_id}`);
+        }
+        
+        const availableStock = stockResult.rows[0].stock_quantity;
+        if (availableStock < item.quantity) {
+          throw new Error(`Insufficient stock for item. Available: ${availableStock}, Requested: ${item.quantity}`);
+        }
+      }
+      
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Stock not available. Please update your cart.',
+        error: err.message 
+      });
+    } finally {
+      client.release();
+    }
+
+    // If stock check passes, calculate total
+    const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    // Prepare bill description
+    const description = cart.map(item => `Variant ${item.variant_id} (x${item.quantity})`).join(', ');
+    // Prepare ToyyibPay bill data
+    const billData = {
+      userSecretKey: TOYYIBPAY_API_KEY,
+      categoryCode: TOYYIBPAY_CATEGORY_CODE,
+      billName: 'BND Order',
+      billDescription: description,
+      billPriceSetting: 1,
+      billPayorInfo: 1,
+      billAmount: (total * 100).toFixed(0), // in cents
+      billReturnUrl: req.protocol + '://' + req.get('host') + `/thank-you/${orderId}?status=1`,
+      billCallbackUrl: req.protocol + '://' + req.get('host') + '/toyyibpay-callback',
+      billExternalReferenceNo: `BND-${orderId}-${Date.now()}`,
+      billTo: customer.name,
+      billEmail: customer.email,
+      billPhone: customer.phone,
+      billSplitPayment: 0,
+      billSplitPaymentArgs: '',
+      billPaymentChannel: '0',
+      billDisplayMerchant: 1
+    };
+    // Call ToyyibPay API
+    const response = await axios.post(TOYYIBPAY_API_URL, new URLSearchParams(billData));
+    if (response.data && response.data[0] && response.data[0].BillCode) {
+      const billCode = response.data[0].BillCode;
+      const paymentUrl = `https://toyyibpay.com/${billCode}`;
+      return res.json({ success: true, paymentUrl });
+    } else {
+      return res.status(500).json({ success: false, message: 'Failed to create bill.' });
+    }
+  } catch (err) {
+    console.error('ToyyibPay checkout error:', err);
+    return res.status(500).json({ success: false, message: 'Checkout error.' });
+  }
+});
+
+// ToyyibPay Callback Endpoint - Handle payment confirmation
+app.post('/toyyibpay-callback', async (req, res) => {
+  try {
+    const { order_id, status, billcode } = req.body;
+    console.log('ToyyibPay callback received:', { order_id, status, billcode });
+    
+    if (status === '1') { // Payment successful
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        
+        // Check if order is still pending
+        const orderCheck = await client.query(
+          'SELECT status FROM orders WHERE order_id = $1 FOR UPDATE',
+          [order_id]
+        );
+        
+        if (orderCheck.rows.length === 0) {
+          throw new Error('Order not found');
+        }
+        
+        if (orderCheck.rows[0].status === 'paid') {
+          console.log(`Order ${order_id} already marked as paid`);
+          await client.query('COMMIT');
+          return res.json({ success: true, message: 'Order already processed' });
+        }
+        
+        // Update order status to paid
+        await client.query(
+          'UPDATE orders SET status = $1, payment_date = NOW() WHERE order_id = $2',
+          ['paid', order_id]
+        );
+        
+        // Get order items for stock update
+        const orderItems = await client.query(
+          'SELECT variant_id, quantity FROM order_items WHERE order_id = $1',
+          [order_id]
+        );
+        
+        // Update stock for each item
+        for (const item of orderItems.rows) {
+          await client.query(
+            'UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2',
+            [item.quantity, item.variant_id]
+          );
+        }
+        
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Payment processed successfully' });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error processing payment:', err);
+        res.status(500).json({ success: false, message: 'Error processing payment' });
+      } finally {
+        client.release();
+      }
+    } else {
+      // Payment failed or pending
+      await pool.query(
+        'UPDATE orders SET status = $1 WHERE order_id = $2',
+        [status === '2' ? 'pending' : 'failed', order_id]
+      );
+      console.log(`Order ${order_id} payment status: ${status}`);
+      res.json({ success: true, message: 'Payment status updated' });
+    }
+  } catch (err) {
+    console.error('ToyyibPay callback error:', err);
+    res.status(500).json({ success: false, message: 'Callback error' });
+  }
+});
+
+// ToyyibPay Return URL Handler - When user returns from payment
 app.get('/thank-you/:orderId', async (req, res) => {
   const { orderId } = req.params;
   const { status } = req.query; // ToyyibPay will add status parameter
@@ -227,7 +658,7 @@ app.get('/thank-you/:orderId', async (req, res) => {
       JOIN product_variants pv ON oi.variant_id = pv.variant_id
       JOIN products p ON pv.product_id = p.product_id
       WHERE oi.order_id = $1
-      ORDER BY oi.order_item_id
+      ORDER BY oi.item_id
     `, [orderId]);
     
     res.render('thank-you', {
@@ -239,330 +670,6 @@ app.get('/thank-you/:orderId', async (req, res) => {
   } catch (err) {
     console.error('Error loading thank you page:', err);
     res.status(500).send('Error loading order details');
-  }
-});
-
-// Stock Check API - Check availability before ordering
-app.post('/api/check-stock', async (req, res) => {
-  const { cart } = req.body;
-  if (!cart || !Array.isArray(cart) || cart.length === 0) {
-    return res.status(400).json({ success: false, message: 'Cart is required.' });
-  }
-  try {
-    const stockChecks = [];
-    for (const item of cart) {
-      const stockResult = await pool.query(
-        'SELECT pv.stock_quantity, pv.variant_id, pv.size, pv.color, p.name FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1',
-        [item.variant_id]
-      );
-      if (stockResult.rows.length === 0) {
-        stockChecks.push({
-          variant_id: item.variant_id,
-          available: 0,
-          requested: item.quantity,
-          in_stock: false,
-          message: 'Variant not found'
-        });
-      } else {
-        const available = stockResult.rows[0].stock_quantity;
-        const inStock = available >= item.quantity;
-        stockChecks.push({
-          variant_id: item.variant_id,
-          product_name: stockResult.rows[0].name,
-          size: stockResult.rows[0].size,
-          color: stockResult.rows[0].color,
-          available: available,
-          requested: item.quantity,
-          in_stock: inStock,
-          message: inStock ? 'In stock' : `Only ${available} available`
-        });
-      }
-    }
-    const allInStock = stockChecks.every(check => check.in_stock);
-    res.json({
-      success: true,
-      all_in_stock: allInStock,
-      stock_checks: stockChecks
-    });
-  } catch (err) {
-    console.error('Error checking stock:', err);
-    res.status(500).json({ success: false, message: 'Error checking stock availability.' });
-  }
-});
-
-// Real-time Stock Validation API - For immediate stock checking
-app.post('/api/validate-stock', async (req, res) => {
-  const { cart } = req.body;
-  if (!cart || !Array.isArray(cart) || cart.length === 0) {
-    return res.status(400).json({ success: false, message: 'Cart is required.' });
-  }
-  
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    
-    const validationResults = [];
-    let allValid = true;
-    
-    for (const item of cart) {
-      // Use FOR UPDATE to lock the row and prevent race conditions
-      const stockResult = await client.query(
-        'SELECT pv.stock_quantity, pv.variant_id, pv.size, pv.color, p.name FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.variant_id = $1 FOR UPDATE',
-        [item.variant_id]
-      );
-      
-      if (stockResult.rows.length === 0) {
-        validationResults.push({
-          variant_id: item.variant_id,
-          valid: false,
-          message: 'Variant not found'
-        });
-        allValid = false;
-      } else {
-        const available = stockResult.rows[0].stock_quantity;
-        const valid = available >= item.quantity;
-        
-        validationResults.push({
-          variant_id: item.variant_id,
-          product_name: stockResult.rows[0].name,
-          size: stockResult.rows[0].size,
-          color: stockResult.rows[0].color,
-          available: available,
-          requested: item.quantity,
-          valid: valid,
-          message: valid ? 'Stock available' : `Only ${available} available`
-        });
-        
-        if (!valid) {
-          allValid = false;
-        }
-      }
-    }
-    
-    await client.query('COMMIT');
-    
-    res.json({
-      success: true,
-      all_valid: allValid,
-      validation_results: validationResults
-    });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error validating stock:', err);
-    res.status(500).json({ success: false, message: 'Error validating stock availability.' });
-  } finally {
-    client.release();
-  }
-});
-
-// API Route for Creating Pending Order (before payment)
-app.post('/api/create-pending-order', async (req, res) => {
-  const { email, name, phone, address, cart } = req.body;
-  // cart: [{ variant_id, quantity, price }]
-  if (!cart || !Array.isArray(cart) || cart.length === 0 || !email) {
-    return res.status(400).json({ success: false, message: 'Missing required order information.' });
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    
-    // 1. Upsert user
-    const userResult = await client.query(
-      `INSERT INTO users (name, email, phone, address)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name, phone=EXCLUDED.phone, address=EXCLUDED.address
-       RETURNING user_id`,
-      [name || 'New User', email, phone || '', address || '']
-    );
-    const userId = userResult.rows[0].user_id;
-
-    // 2. Calculate total
-    let totalAmount = 0;
-    for (const item of cart) {
-      totalAmount += item.price * item.quantity;
-    }
-
-    // 3. Insert order with 'pending' status (no stock deduction yet)
-    const orderResult = await client.query(
-      'INSERT INTO orders (customer_id, order_date, status, total_amount) VALUES ($1, NOW(), $2, $3) RETURNING order_id',
-      [userId, 'pending', totalAmount]
-    );
-    const orderId = orderResult.rows[0].order_id;
-
-    // 4. For each item: check stock with FOR UPDATE lock and insert order_item
-    for (const item of cart) {
-      // a. Check stock availability with row lock to prevent race conditions
-      const stockResult = await client.query(
-        'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
-        [item.variant_id]
-      );
-      if (stockResult.rows.length === 0) {
-        throw new Error(`Variant ${item.variant_id} not found`);
-      }
-      
-      const availableStock = stockResult.rows[0].stock_quantity;
-      if (availableStock < item.quantity) {
-        throw new Error(`Insufficient stock for variant ${item.variant_id}. Available: ${availableStock}, Requested: ${item.quantity}`);
-      }
-      
-      // b. Insert order_item
-      await client.query(
-        'INSERT INTO order_items (order_id, variant_id, quantity, price_at_purchase) VALUES ($1, $2, $3, $4)',
-        [orderId, item.variant_id, item.quantity, item.price]
-      );
-    }
-
-    await client.query('COMMIT');
-    res.json({ 
-      success: true, 
-      message: 'Pending order created successfully!', 
-      orderId
-    });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Error creating pending order:', err);
-    res.status(500).json({ success: false, message: err.message || 'Failed to create pending order.' });
-  } finally {
-    client.release();
-  }
-});
-
-// ToyyibPay Checkout Endpoints
-app.post('/checkout', async (req, res) => {
-  try {
-    const { cart, customer, orderId } = req.body;
-    if (!cart || !Array.isArray(cart) || cart.length === 0) {
-      return res.status(400).json({ success: false, message: 'Cart is empty.' });
-    }
-    if (!customer || !customer.name || !customer.email || !customer.phone) {
-      return res.status(400).json({ success: false, message: 'Customer info required.' });
-    }
-    if (!orderId) {
-      return res.status(400).json({ success: false, message: 'Order ID required.' });
-    }
-    
-    // Calculate total
-    const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    // Prepare bill description
-    const description = cart.map(item => `${item.name} (x${item.quantity})`).join(', ');
-    // Prepare ToyyibPay bill data
-    const billData = {
-      userSecretKey: TOYYIBPAY_API_KEY,
-      categoryCode: TOYYIBPAY_CATEGORY_CODE,
-      billName: 'BND Order',
-      billDescription: description,
-      billPriceSetting: 1,
-      billPayorInfo: 1,
-      billAmount: (total * 100).toFixed(0), // in cents
-      billReturnUrl: req.protocol + '://' + req.get('host') + `/thank-you/${orderId}`,
-      billCallbackUrl: req.protocol + '://' + req.get('host') + '/toyyibpay-callback',
-      billExternalReferenceNo: `BND-${orderId}-${Date.now()}`,
-      billTo: customer.name,
-      billEmail: customer.email,
-      billPhone: customer.phone,
-      billSplitPayment: 0,
-      billSplitPaymentArgs: '',
-      billPaymentChannel: '0',
-      billDisplayMerchant: 1
-    };
-    // Call ToyyibPay API
-    const response = await axios.post(TOYYIBPAY_API_URL, new URLSearchParams(billData));
-    if (response.data && response.data[0] && response.data[0].BillCode) {
-      const billCode = response.data[0].BillCode;
-      const paymentUrl = `https://toyyibpay.com/${billCode}`;
-      return res.json({ success: true, paymentUrl });
-    } else {
-      return res.status(500).json({ success: false, message: 'Failed to create bill.' });
-    }
-  } catch (err) {
-    console.error('ToyyibPay checkout error:', err);
-    return res.status(500).json({ success: false, message: 'Checkout error.' });
-  }
-});
-
-// ToyyibPay Callback Endpoint - Handle payment confirmation
-app.post('/toyyibpay-callback', async (req, res) => {
-  try {
-    const { order_id, status, billcode } = req.body;
-    console.log('ToyyibPay callback received:', { order_id, status, billcode });
-    
-    if (status === '1') { // Payment successful
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        
-        // Check if order is still pending (prevent double processing)
-        const orderCheck = await client.query(
-          'SELECT status FROM orders WHERE order_id = $1 FOR UPDATE',
-          [order_id]
-        );
-        
-        if (orderCheck.rows.length === 0) {
-          throw new Error('Order not found');
-        }
-        
-        if (orderCheck.rows[0].status === 'paid') {
-          console.log(`Order ${order_id} already processed`);
-          await client.query('COMMIT');
-          return res.json({ success: true, message: 'Order already processed' });
-        }
-        
-        // Update order status to 'paid'
-        await client.query(
-          'UPDATE orders SET status = $1 WHERE order_id = $2',
-          ['paid', order_id]
-        );
-        
-        // Get order items and deduct stock with validation
-        const orderItemsResult = await client.query(
-          'SELECT variant_id, quantity FROM order_items WHERE order_id = $1',
-          [order_id]
-        );
-        
-        // Deduct stock for each item with validation
-        for (const item of orderItemsResult.rows) {
-          // Check current stock before deducting
-          const stockCheck = await client.query(
-            'SELECT stock_quantity FROM product_variants WHERE variant_id = $1 FOR UPDATE',
-            [item.variant_id]
-          );
-          
-          if (stockCheck.rows.length === 0) {
-            throw new Error(`Variant ${item.variant_id} not found during stock deduction`);
-          }
-          
-          const currentStock = stockCheck.rows[0].stock_quantity;
-          if (currentStock < item.quantity) {
-            throw new Error(`Insufficient stock for variant ${item.variant_id}. Available: ${currentStock}, Requested: ${item.quantity}`);
-          }
-          
-          // Deduct stock
-          await client.query(
-            'UPDATE product_variants SET stock_quantity = stock_quantity - $1 WHERE variant_id = $2',
-            [item.quantity, item.variant_id]
-          );
-          
-          console.log(`Deducted ${item.quantity} from variant ${item.variant_id}`);
-        }
-        
-        await client.query('COMMIT');
-        console.log(`Order ${order_id} payment confirmed and stock updated successfully`);
-        res.json({ success: true, message: 'Payment confirmed and stock updated' });
-      } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Error processing payment confirmation:', err);
-        res.status(500).json({ success: false, message: 'Error processing payment' });
-      } finally {
-        client.release();
-      }
-    } else {
-      // Payment failed or pending
-      console.log(`Order ${order_id} payment status: ${status}`);
-      res.json({ success: true, message: 'Payment status received' });
-    }
-  } catch (err) {
-    console.error('ToyyibPay callback error:', err);
-    res.status(500).json({ success: false, message: 'Callback error' });
   }
 });
 
