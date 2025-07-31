@@ -8,14 +8,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/css/header-mobile-fixes.css">
-  <style>
-    .search-box {
-      background: #111 !important;
-      color: #e0e0e0 !important;
-      border: 1.5px solid #333;
-    }
-  </style>
 </head>
 <body class="<%= typeof pageClass !== 'undefined' ? pageClass : '' %>">
   <header class="main-header">
@@ -30,21 +22,29 @@
             <a href="/products" class="collection-box">
               <img src="/images/blank-canvas-poster.jpg" alt="THE BLANK CANVAS" />
               <div class="collection-meta">
+                <div class="collection-title">The Blank Canvas</div>
+                <div class="collection-volume">Volume One</div>
               </div>
             </a>
             <div class="collection-box">
               <img src="/images/ComingSoon.png" alt="Coming Soon" />
               <div class="collection-meta">
+                <div class="collection-title">COMING SOON</div>
+                <div class="collection-volume">Volume Two</div>
               </div>
             </div>
             <div class="collection-box">
               <img src="/images/ComingSoon.png" alt="Coming Soon" />
               <div class="collection-meta">
+                <div class="collection-title">COMING SOON</div>
+                <div class="collection-volume">Volume Three</div>
               </div>
             </div>
             <div class="collection-box">
               <img src="/images/ComingSoon.png" alt="Coming Soon" />
               <div class="collection-meta">
+                <div class="collection-title">COMING SOON</div>
+                <div class="collection-volume">Volume Four</div>
               </div>
             </div>
           </div>
@@ -66,8 +66,6 @@
     </div>
 
     <div class="header-actions">
-      <!-- Search bar removed as requested -->
-
       <div class="cart-container">
         <div class="cart-icon" id="cartIcon">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" width="20" height="20" viewBox="0 0 24 24">
@@ -112,5 +110,11 @@
       </div>
     </div>
   </header>
-</body>
-</html>
+
+  <!-- Mobile Navigation Menu -->
+  <div class="mobile-nav" id="mobileNav">
+    <button class="mobile-nav-close" id="mobileNavClose">×</button>
+    <a href="/">Home</a>
+    <a href="/products">Collections</a>
+    <a href="/about">About Us</a>
+  </div>
